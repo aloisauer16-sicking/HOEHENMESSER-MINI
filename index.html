@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="ALT">
+<title>ALT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@200;300&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0; padding: 0;
+  }
+
+  :root {
+    --c-bg:    #000;
+    --c-main:  #e8f4e8;
+    --c-dim:   #4a6a4a;
+    --c-acc:   #7fff7f;
+    --c-warn:  #ffaa00;
+    --c-err:   #ff4444;
+    --c-line:  #1a2a1a;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--c-bg);
+    overflow: hidden;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* ── Scanline texture overlay ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 3px,
+      rgba(0,0,0,0.18) 3px,
+      rgba(0,0,0,0.18) 4px
+    );
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  /* ── Corner glow ── */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(ellipse at 50% 50%, rgba(0,80,0,0.08) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  #app {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+             env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    z-index: 1;
+  }
+
+  /* ── Top strip ── */
+  #topstrip {
+    position: absolute;
+    top: env(safe-area-inset-top, 0px);
+    left: 0; right: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px 8px;
+  }
+
+  #gps-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--c-acc);
+    box-shadow: 0 0 6px var(--c-acc);
+    animation: blink 1.6s ease-in-out infinite;
+  }
+  #gps-dot.wait { background: var(--c-warn); box-shadow: 0 0 6px var(--c-warn); }
+  #gps-dot.err  { background: var(--c-err);  box-shadow: 0 0 6px var(--c-err); animation:none; }
+
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+  #gps-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--c-dim);
+    letter-spacing: 2px;
+  }
+
+  #acc-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--c-dim);
+    letter-spacing: 1px;
+  }
+
+  /* ── Main altitude display ── */
+  #alt-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    flex: 1;
+    padding: 0 8px;
+  }
+
+  #alt-number {
+    font-family: 'Oswald', sans-serif;
+    font-weight: 200;
+    color: var(--c-main);
+    text-shadow: 0 0 40px rgba(127,255,127,0.15);
+    line-height: 0.9;
+    letter-spacing: -2px;
+    transition: color 0.4s;
+
+    /* Fluid font: fills full width */
+    font-size: clamp(80px, 28vw, 260px);
+    width: 100%;
+    text-align: center;
+  }
+
+  #alt-number.updating {
+    text-shadow: 0 0 60px rgba(127,255,127,0.4);
+  }
+
+  #alt-number.no-data {
+    color: var(--c-line);
+    text-shadow: none;
+  }
+
+  #unit-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 6px;
+  }
+
+  #unit-label {
+    font-family: 'Oswald', sans-serif;
+    font-weight: 300;
+    font-size: clamp(18px, 5vw, 48px);
+    color: var(--c-dim);
+    letter-spacing: 8px;
+  }
+
+  #trend-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: clamp(14px, 3.5vw, 32px);
+    color: var(--c-dim);
+    min-width: 24px;
+    text-align: center;
+    transition: color 0.3s;
+  }
+  #trend-label.up   { color: var(--c-acc); }
+  #trend-label.down { color: var(--c-warn); }
+
+  /* ── Bottom strip ── */
+  #bottomstrip {
+    position: absolute;
+    bottom: env(safe-area-inset-bottom, 0px);
+    left: 0; right: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding: 8px 16px 14px;
+  }
+
+  #minmax-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--c-dim);
+    letter-spacing: 1px;
+    line-height: 1.8;
+  }
+
+  #clock-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--c-dim);
+    letter-spacing: 2px;
+  }
+
+  /* ── Horizontal lines (instrument feel) ── */
+  .hline {
+    position: absolute;
+    left: 0; right: 0;
+    height: 0.5px;
+    background: var(--c-line);
+  }
+  #hline-top    { top: 42px; }
+  #hline-bottom { bottom: 40px; }
+
+  /* ── Error overlay ── */
+  #err-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 12px;
+    z-index: 50;
+    padding: 40px 24px;
+    text-align: center;
+  }
+  #err-overlay.show { display: flex; }
+  #err-icon {
+    font-size: 36px;
+    color: var(--c-err);
+  }
+  #err-text {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    color: var(--c-err);
+    line-height: 1.8;
+    letter-spacing: 1px;
+  }
+  #err-btn {
+    margin-top: 8px;
+    background: transparent;
+    border: 0.5px solid var(--c-err);
+    border-radius: 4px;
+    color: var(--c-err);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 2px;
+    padding: 10px 20px;
+    cursor: pointer;
+  }
+
+  /* ── Tap to wake on long-press ── */
+  #recal-hint {
+    position: absolute;
+    bottom: 58px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: #222;
+    letter-spacing: 2px;
+    white-space: nowrap;
+    transition: color 0.5s;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- Horizontal rules -->
+  <div class="hline" id="hline-top"></div>
+  <div class="hline" id="hline-bottom"></div>
+
+  <!-- Top strip -->
+  <div id="topstrip">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div id="gps-dot" class="wait"></div>
+      <span id="gps-label">WAIT</span>
+    </div>
+    <span id="acc-label">±-- M</span>
+  </div>
+
+  <!-- Main -->
+  <div id="alt-wrap">
+    <div id="alt-number" class="no-data">---</div>
+    <div id="unit-row">
+      <span id="trend-label">—</span>
+      <span id="unit-label">M</span>
+    </div>
+  </div>
+
+  <!-- Bottom strip -->
+  <div id="bottomstrip">
+    <div id="minmax-label">MIN --<br>MAX --</div>
+    <span id="clock-label">--:--:--</span>
+  </div>
+
+  <div id="recal-hint">HOLD TO RESET</div>
+
+</div>
+
+<!-- Error overlay -->
+<div id="err-overlay">
+  <div id="err-icon">⚠</div>
+  <div id="err-text" id="err-text"></div>
+  <button id="err-btn" onclick="restart()">RETRY</button>
+</div>
+
+<script>
+'use strict';
+(function(){
+
+const altEl    = document.getElementById('alt-number');
+const gpsLabel = document.getElementById('gps-label');
+const gpsDot   = document.getElementById('gps-dot');
+const accLabel = document.getElementById('acc-label');
+const trendEl  = document.getElementById('trend-label');
+const mmLabel  = document.getElementById('minmax-label');
+const clockEl  = document.getElementById('clock-label');
+const errOv    = document.getElementById('err-overlay');
+const errTxt   = document.getElementById('err-text');
+const hint     = document.getElementById('recal-hint');
+
+let watchId = null;
+let altMin = Infinity, altMax = -Infinity;
+let history = [];
+let flashTimer = null;
+let holdTimer = null;
+
+/* Clock */
+function tick(){
+  clockEl.textContent = new Date().toLocaleTimeString('de-AT', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+tick(); setInterval(tick, 1000);
+
+/* GPS states */
+function setGps(state){
+  gpsDot.className = state;
+  gpsLabel.textContent = state === '' ? 'LIVE' : state === 'wait' ? 'WAIT' : 'ERR';
+}
+
+/* Flash on update */
+function flash(){
+  if(flashTimer) clearTimeout(flashTimer);
+  altEl.classList.add('updating');
+  flashTimer = setTimeout(()=>altEl.classList.remove('updating'), 300);
+}
+
+/* Format */
+function fmt(m){ return Math.round(m).toLocaleString('de-AT'); }
+
+/* Position callback */
+function onPos(pos){
+  errOv.classList.remove('show');
+  setGps('');
+  const raw = pos.coords.altitude;
+  if(raw === null || raw === undefined){
+    showErr('GPS LIEFERT\nKEINE HÖHENDATEN\nBITTE IM FREIEN VERSUCHEN');
+    return;
+  }
+  const alt = raw;
+  history.push(alt);
+  if(history.length > 10) history.shift();
+  if(alt < altMin) altMin = alt;
+  if(alt > altMax) altMax = alt;
+
+  altEl.textContent = fmt(alt);
+  altEl.classList.remove('no-data');
+  flash();
+
+  const acc = pos.coords.altitudeAccuracy;
+  accLabel.textContent = acc !== null ? '±' + Math.round(acc) + ' M' : '±? M';
+
+  mmLabel.innerHTML = 'MIN ' + fmt(altMin) + '<br>MAX ' + fmt(altMax);
+
+  /* Trend */
+  if(history.length >= 4){
+    const diff = alt - history[history.length - 4];
+    if(diff > 0.5){
+      trendEl.textContent = '↑'; trendEl.className = 'up';
+    } else if(diff < -0.5){
+      trendEl.textContent = '↓'; trendEl.className = 'down';
+    } else {
+      trendEl.textContent = '—'; trendEl.className = '';
+    }
+  }
+}
+
+function onErr(e){
+  setGps('err');
+  altEl.classList.add('no-data');
+  let msg = 'GPS FEHLER';
+  if(e.code === 1) msg = 'STANDORTZUGRIFF\nVERWEIGERT\nBITTE BERECHTIGUNG ERTEILEN';
+  else if(e.code === 2) msg = 'POSITION\nNICHT VERFÜGBAR\nIM FREIEN VERSUCHEN';
+  else if(e.code === 3) msg = 'GPS TIMEOUT\nRETRY TIPPEN';
+  showErr(msg);
+}
+
+function showErr(msg){
+  errTxt.textContent = msg;
+  errOv.classList.add('show');
+}
+
+function startWatch(){
+  if(!navigator.geolocation){ showErr('GEOLOCATION\nNICHT UNTERSTÜTZT'); return; }
+  if(watchId !== null) navigator.geolocation.clearWatch(watchId);
+  setGps('wait');
+  watchId = navigator.geolocation.watchPosition(onPos, onErr, {
+    enableHighAccuracy: true,
+    maximumAge: 0,
+    timeout: 20000
+  });
+}
+
+window.restart = function(){
+  altMin = Infinity; altMax = -Infinity;
+  history = [];
+  altEl.textContent = '---';
+  altEl.classList.add('no-data');
+  accLabel.textContent = '±-- M';
+  mmLabel.innerHTML = 'MIN --<br>MAX --';
+  trendEl.textContent = '—'; trendEl.className = '';
+  errOv.classList.remove('show');
+  startWatch();
+};
+
+/* Long-press to reset */
+document.addEventListener('pointerdown', ()=>{
+  holdTimer = setTimeout(()=>{
+    hint.style.color = '#7fff7f';
+    setTimeout(()=>{ hint.style.color=''; }, 600);
+    window.restart();
+  }, 1500);
+});
+document.addEventListener('pointerup', ()=>{ clearTimeout(holdTimer); });
+document.addEventListener('pointercancel', ()=>{ clearTimeout(holdTimer); });
+
+/* Prevent sleep on modern browsers */
+let wakeLock = null;
+async function requestWakeLock(){
+  try {
+    if('wakeLock' in navigator){
+      wakeLock = await navigator.wakeLock.request('screen');
+    }
+  } catch(_){}
+}
+requestWakeLock();
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible') requestWakeLock();
+});
+
+startWatch();
+})();
+</script>
+</body>
+</html>
